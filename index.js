@@ -250,57 +250,68 @@ async function callBitrixMethod(payload, method, params) {
   return body;
 }
 
-async function registerBizprocActivity(payload, event, query) {
+function buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName) {
+  return {
+    CODE: code,
+    HANDLER: handlerUrl,
+    AUTH_USER_ID: getAuthUserId(payload),
+    USE_SUBSCRIPTION: 'Y',
+    NAME: {
+      ru: ruName,
+      en: 'RU to EN transliteration',
+    },
+    DESCRIPTION: {
+      ru: 'Переводит строку с русского на латиницу по фонетическому правилу',
+      en: 'Transliterates Russian text to Latin characters',
+    },
+    PROPERTIES: {
+      inputString: {
+        Name: {
+          ru: 'Строка',
+          en: 'Input string',
+        },
+        Description: {
+          ru: 'Поле документа или конкатенация полей',
+          en: 'Document field or field concatenation',
+        },
+        Type: 'string',
+        Required: 'Y',
+        Multiple: 'N',
+        Default: '{=Document:TITLE}',
+      },
+    },
+    RETURN_PROPERTIES: {
+      outputString: {
+        Name: {
+          ru: 'Транслит',
+          en: 'Transliteration',
+        },
+        Type: 'string',
+        Multiple: 'N',
+        Default: null,
+      },
+    },
+    FILTER: {
+      INCLUDE: ['b24'],
+    },
+  };
+}
+
+async function registerBizprocItem(payload, method, itemType, event, query) {
   const handlerUrl = buildHandlerUrl(event, query);
 
   try {
-    const result = await callBitrixMethod(payload, 'bizproc.activity.add', {
-      CODE: 'ru_to_latin_translit',
-      HANDLER: handlerUrl,
-      AUTH_USER_ID: getAuthUserId(payload),
-      USE_SUBSCRIPTION: 'Y',
-      NAME: {
-        ru: 'Транслитерация RU -> EN',
-        en: 'RU to EN transliteration',
-      },
-      DESCRIPTION: {
-        ru: 'Переводит строку с русского на латиницу по фонетическому правилу',
-        en: 'Transliterates Russian text to Latin characters',
-      },
-      PROPERTIES: {
-        inputString: {
-          Name: {
-            ru: 'Строка',
-            en: 'Input string',
-          },
-          Description: {
-            ru: 'Поле документа или конкатенация полей',
-            en: 'Document field or field concatenation',
-          },
-          Type: 'string',
-          Required: 'Y',
-          Multiple: 'N',
-          Default: '{=Document:TITLE}',
-        },
-      },
-      RETURN_PROPERTIES: {
-        outputString: {
-          Name: {
-            ru: 'Транслит',
-            en: 'Transliteration',
-          },
-          Type: 'string',
-          Multiple: 'N',
-          Default: null,
-        },
-      },
-      FILTER: {
-        INCLUDE: ['b24'],
-      },
-    });
+    const code = itemType === 'robot' ? 'ru_to_latin_translit_robot' : 'ru_to_latin_translit_activity';
+    const ruName = itemType === 'robot' ? 'Транслитерация RU в EN' : 'Транслитерация RU -> EN';
+    const result = await callBitrixMethod(
+      payload,
+      method,
+      buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName),
+    );
 
     return {
       installed: true,
+      type: itemType,
       alreadyInstalled: false,
       handlerUrl,
       result,
@@ -309,6 +320,7 @@ async function registerBizprocActivity(payload, event, query) {
     if (String(error.bitrixBody?.error || '') === 'ERROR_ACTIVITY_ALREADY_INSTALLED') {
       return {
         installed: true,
+        type: itemType,
         alreadyInstalled: true,
         handlerUrl,
       };
@@ -316,6 +328,20 @@ async function registerBizprocActivity(payload, event, query) {
 
     throw error;
   }
+}
+
+async function registerBitrix24Extensions(payload, event, query) {
+  const [activity, robot] = await Promise.all([
+    registerBizprocItem(payload, 'bizproc.activity.add', 'activity', event, query),
+    registerBizprocItem(payload, 'bizproc.robot.add', 'robot', event, query),
+  ]);
+
+  return {
+    installed: true,
+    activity,
+    robot,
+    handlerUrl: robot.handlerUrl,
+  };
 }
 
 async function sendBizprocEvent(payload, outputString) {
@@ -388,7 +414,7 @@ exports.handler = async function handler(event) {
     const action = getAction(payload, query);
 
     if (action === 'install') {
-      const installResult = await registerBizprocActivity(payload, event, query);
+      const installResult = await registerBitrix24Extensions(payload, event, query);
 
       return response(200, {
         ok: true,

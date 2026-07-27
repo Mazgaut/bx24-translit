@@ -5,7 +5,7 @@ Minimal Yandex Cloud Function for a Bitrix24 workflow activity that transliterat
 ## Files
 
 - `index.js` - function handler for Yandex Cloud Functions.
-- `register-activity.example.js` - example payload for registering the workflow activity with `bizproc.activity.add`.
+- `register-activity.example.js` - legacy example payload for registering only the workflow activity with `bizproc.activity.add`.
 
 ## Yandex Cloud Function
 
@@ -32,15 +32,20 @@ Use this URL as the Bitrix24 initial installation path:
 https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=install
 ```
 
-During installation the function automatically registers the workflow activity and sets this handler URL:
+During installation the function automatically registers:
+
+- workflow activity through `bizproc.activity.add`
+- automation rule/robot through `bizproc.robot.add`
+
+Both use this handler URL:
 
 ```text
 https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=handler
 ```
 
-## Bitrix24 Workflow Action
+## Bitrix24 Workflow Action And Automation Robot
 
-The function registers the action automatically through `bizproc.activity.add`. The action has:
+The function registers both items automatically. They have:
 
 - one input property: `inputString`
 - one return property: `outputString`
@@ -69,7 +74,9 @@ Create a local server application:
 https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=install
 ```
 
-After saving/opening the app, Bitrix24 sends an installation callback to the function. The function registers the workflow activity automatically.
+After saving/opening the app, Bitrix24 sends an installation callback to the function. The function registers the workflow activity and the automation robot automatically.
+
+Use the robot in Tasks and Projects automation. Use the workflow activity in full workflow templates.
 
 ## Quick HTTP Test
 
