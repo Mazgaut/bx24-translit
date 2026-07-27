@@ -40,7 +40,8 @@ function transliterate(value) {
   return String(value ?? '')
     .split('')
     .map((char) => Object.prototype.hasOwnProperty.call(CYRILLIC_TO_LATIN, char) ? CYRILLIC_TO_LATIN[char] : char)
-    .join('');
+    .join('')
+    .replace(/\s+/g, '_');
 }
 
 function response(statusCode, body) {

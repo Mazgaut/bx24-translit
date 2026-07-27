@@ -89,5 +89,5 @@ https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-stri
 Expected body:
 
 ```json
-{"ok":true,"mode":"test","input":"Привет мир","output":"Privet mir"}
+{"ok":true,"mode":"test","input":"Привет мир","output":"Privet_mir"}
 ```
