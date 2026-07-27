@@ -23,19 +23,24 @@ Set environment variables:
 
 ```text
 HANDLER_SECRET=some-long-random-string
+PUBLIC_FUNCTION_URL=https://functions.yandexcloud.net/d4e9c419gj4u8645govi
 ```
 
-Your handler URL will look like this:
+Use this URL as the Bitrix24 initial installation path:
 
 ```text
-https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string
+https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=install
 ```
 
-Use that URL as `HANDLER` when registering the Bitrix24 action.
+During installation the function automatically registers the workflow activity and sets this handler URL:
+
+```text
+https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=handler
+```
 
 ## Bitrix24 Workflow Action
 
-The action should have:
+The function registers the action automatically through `bizproc.activity.add`. The action has:
 
 - one input property: `inputString`
 - one return property: `outputString`
@@ -51,6 +56,21 @@ Example:
 
 The function returns the result through `bizproc.event.send`, using the `event_token` received from Bitrix24.
 
+## Bitrix24 Local App Settings
+
+Create a local server application:
+
+- type: server application
+- mode: API-only application
+- permissions: `bizproc`
+- initial installation path:
+
+```text
+https://functions.yandexcloud.net/d4e9c419gj4u8645govi?key=some-long-random-string&action=install
+```
+
+After saving/opening the app, Bitrix24 sends an installation callback to the function. The function registers the workflow activity automatically.
+
 ## Quick HTTP Test
 
 After deployment, this should return transliteration without calling Bitrix24:
@@ -64,4 +84,3 @@ Expected body:
 ```json
 {"ok":true,"mode":"test","input":"Привет мир","output":"Privet mir"}
 ```
-

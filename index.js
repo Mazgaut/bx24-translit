@@ -121,6 +121,26 @@ function getQuery(event) {
   return event?.queryStringParameters || {};
 }
 
+function getAction(payload, query) {
+  if (query?.action) {
+    return query.action;
+  }
+
+  if (payload?.action) {
+    return payload.action;
+  }
+
+  if (getEventToken(payload)) {
+    return 'handler';
+  }
+
+  if (getAccessToken(payload)) {
+    return 'install';
+  }
+
+  return 'test';
+}
+
 function getInputString(payload, query) {
   return (
     payload?.properties?.inputString ??
@@ -139,6 +159,12 @@ function getAccessToken(payload) {
   return payload?.auth?.access_token || payload?.AUTH_ID || payload?.access_token || '';
 }
 
+function getAuthUserId(payload) {
+  const userId = payload?.auth?.user_id || payload?.auth?.USER_ID || payload?.user_id || 1;
+  const parsed = Number(userId);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 function getRestEndpoint(payload) {
   const endpoint = payload?.auth?.client_endpoint || payload?.auth?.CLIENT_ENDPOINT;
   if (endpoint) {
@@ -151,6 +177,145 @@ function getRestEndpoint(payload) {
   }
 
   return '';
+}
+
+function getPublicFunctionUrl(event) {
+  if (process.env.PUBLIC_FUNCTION_URL) {
+    return process.env.PUBLIC_FUNCTION_URL;
+  }
+
+  const host = getHeaderRaw(event?.headers, 'host');
+  const proto = getHeaderRaw(event?.headers, 'x-forwarded-proto') || 'https';
+  const path = event?.path || event?.requestContext?.http?.path || event?.requestContext?.path || '';
+
+  if (host && path) {
+    return `${proto}://${host}${path}`;
+  }
+
+  throw new Error('Cannot determine public function URL. Set PUBLIC_FUNCTION_URL env variable.');
+}
+
+function getHeaderRaw(headers = {}, name) {
+  const lowerName = name.toLowerCase();
+  const foundKey = Object.keys(headers || {}).find((key) => key.toLowerCase() === lowerName);
+  return foundKey ? String(headers[foundKey] || '') : '';
+}
+
+function buildHandlerUrl(event, query) {
+  const url = new URL(getPublicFunctionUrl(event));
+
+  url.searchParams.set('action', 'handler');
+
+  if (process.env.HANDLER_SECRET) {
+    url.searchParams.set('key', query?.key || process.env.HANDLER_SECRET);
+  }
+
+  return url.toString();
+}
+
+async function callBitrixMethod(payload, method, params) {
+  const accessToken = getAccessToken(payload);
+  const restEndpoint = getRestEndpoint(payload);
+
+  if (!accessToken || !restEndpoint) {
+    throw new Error('Missing Bitrix24 access token or REST endpoint');
+  }
+
+  const response = await fetch(`${restEndpoint}/${method}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({
+      ...params,
+      auth: accessToken,
+    }),
+  });
+
+  const text = await response.text();
+  let body;
+
+  try {
+    body = JSON.parse(text);
+  } catch (_error) {
+    body = text;
+  }
+
+  if (!response.ok || body?.error) {
+    const bitrixError = new Error(`${method} failed: ${response.status} ${JSON.stringify(body)}`);
+    bitrixError.bitrixBody = body;
+    throw bitrixError;
+  }
+
+  return body;
+}
+
+async function registerBizprocActivity(payload, event, query) {
+  const handlerUrl = buildHandlerUrl(event, query);
+
+  try {
+    const result = await callBitrixMethod(payload, 'bizproc.activity.add', {
+      CODE: 'ru_to_latin_translit',
+      HANDLER: handlerUrl,
+      AUTH_USER_ID: getAuthUserId(payload),
+      USE_SUBSCRIPTION: 'Y',
+      NAME: {
+        ru: 'Транслитерация RU -> EN',
+        en: 'RU to EN transliteration',
+      },
+      DESCRIPTION: {
+        ru: 'Переводит строку с русского на латиницу по фонетическому правилу',
+        en: 'Transliterates Russian text to Latin characters',
+      },
+      PROPERTIES: {
+        inputString: {
+          Name: {
+            ru: 'Строка',
+            en: 'Input string',
+          },
+          Description: {
+            ru: 'Поле документа или конкатенация полей',
+            en: 'Document field or field concatenation',
+          },
+          Type: 'string',
+          Required: 'Y',
+          Multiple: 'N',
+          Default: '{=Document:TITLE}',
+        },
+      },
+      RETURN_PROPERTIES: {
+        outputString: {
+          Name: {
+            ru: 'Транслит',
+            en: 'Transliteration',
+          },
+          Type: 'string',
+          Multiple: 'N',
+          Default: null,
+        },
+      },
+      FILTER: {
+        INCLUDE: ['b24'],
+      },
+    });
+
+    return {
+      installed: true,
+      alreadyInstalled: false,
+      handlerUrl,
+      result,
+    };
+  } catch (error) {
+    if (String(error.bitrixBody?.error || '') === 'ERROR_ACTIVITY_ALREADY_INSTALLED') {
+      return {
+        installed: true,
+        alreadyInstalled: true,
+        handlerUrl,
+      };
+    }
+
+    throw error;
+  }
 }
 
 async function sendBizprocEvent(payload, outputString) {
@@ -220,6 +385,18 @@ exports.handler = async function handler(event) {
     assertSecret(query);
 
     const payload = parseBody(event);
+    const action = getAction(payload, query);
+
+    if (action === 'install') {
+      const installResult = await registerBizprocActivity(payload, event, query);
+
+      return response(200, {
+        ok: true,
+        mode: 'install',
+        ...installResult,
+      });
+    }
+
     const inputString = getInputString(payload, query);
     const outputString = transliterate(inputString);
     const sendResult = await sendBizprocEvent(payload, outputString);
@@ -244,4 +421,3 @@ exports.handler = async function handler(event) {
     });
   }
 };
-
