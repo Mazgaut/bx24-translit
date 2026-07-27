@@ -185,6 +185,12 @@ function getPublicFunctionUrl(event) {
     return process.env.PUBLIC_FUNCTION_URL;
   }
 
+  if (event?.url) {
+    const url = new URL(event.url);
+    url.search = '';
+    return url.toString();
+  }
+
   const host = getHeaderRaw(event?.headers, 'host');
   const proto = getHeaderRaw(event?.headers, 'x-forwarded-proto') || 'https';
   const path = event?.path || event?.requestContext?.http?.path || event?.requestContext?.path || '';
@@ -358,7 +364,28 @@ async function listBitrix24Extensions(payload) {
   };
 }
 
+function logInfo(message, data = {}) {
+  console.log(JSON.stringify({
+    level: 'info',
+    message,
+    ...data,
+  }));
+}
+
+function logError(message, error) {
+  console.error(JSON.stringify({
+    level: 'error',
+    message,
+    error: error.message,
+    bitrixBody: error.bitrixBody,
+  }));
+}
+
 async function registerBitrix24Extensions(payload, event, query) {
+  if (!getAccessToken(payload) || !getRestEndpoint(payload)) {
+    throw new Error('Install must be called by Bitrix24 installation callback with OAuth auth data. Direct browser GET cannot install robots.');
+  }
+
   const [activity, robot] = await Promise.all([
     registerBizprocItem(payload, 'bizproc.activity.add', 'activity', event, query),
     registerBizprocItem(payload, 'bizproc.robot.add', 'robot', event, query),
@@ -444,6 +471,18 @@ exports.handler = async function handler(event) {
     if (action === 'install') {
       const installResult = await registerBitrix24Extensions(payload, event, query);
 
+      logInfo('Bitrix24 install completed', {
+        activity: {
+          alreadyInstalled: installResult.activity.alreadyInstalled,
+          updated: Boolean(installResult.activity.updated),
+        },
+        robot: {
+          alreadyInstalled: installResult.robot.alreadyInstalled,
+          updated: Boolean(installResult.robot.updated),
+        },
+        handlerUrl: installResult.handlerUrl,
+      });
+
       return response(200, {
         ok: true,
         mode: 'install',
@@ -453,6 +492,11 @@ exports.handler = async function handler(event) {
 
     if (action === 'list') {
       const listResult = await listBitrix24Extensions(payload);
+
+      logInfo('Bitrix24 extensions listed', {
+        hasActivities: Boolean(listResult.activities),
+        hasRobots: Boolean(listResult.robots),
+      });
 
       return response(200, {
         ok: true,
@@ -479,6 +523,8 @@ exports.handler = async function handler(event) {
       outputString,
     });
   } catch (error) {
+    logError('Handler failed', error);
+
     return response(error.statusCode || 500, {
       ok: false,
       error: error.message,
