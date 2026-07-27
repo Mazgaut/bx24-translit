@@ -251,8 +251,8 @@ async function callBitrixMethod(payload, method, params) {
   return body;
 }
 
-function buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName) {
-  return {
+function buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName, itemType) {
+  const registrationPayload = {
     CODE: code,
     HANDLER: handlerUrl,
     AUTH_USER_ID: getAuthUserId(payload),
@@ -292,22 +292,28 @@ function buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName) {
         Default: null,
       },
     },
-    FILTER: {
-      INCLUDE: ['b24'],
-    },
   };
+
+  if (itemType === 'activity') {
+    registrationPayload.FILTER = {
+      INCLUDE: ['b24'],
+    };
+  }
+
+  return registrationPayload;
 }
 
 async function registerBizprocItem(payload, method, itemType, event, query) {
   const handlerUrl = buildHandlerUrl(event, query);
+  const code = itemType === 'robot' ? 'ru_to_latin_translit_robot' : 'ru_to_latin_translit_activity';
+  const ruName = itemType === 'robot' ? 'Транслитерация RU в EN' : 'Транслитерация RU -> EN';
+  const registrationPayload = buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName, itemType);
 
   try {
-    const code = itemType === 'robot' ? 'ru_to_latin_translit_robot' : 'ru_to_latin_translit_activity';
-    const ruName = itemType === 'robot' ? 'Транслитерация RU в EN' : 'Транслитерация RU -> EN';
     const result = await callBitrixMethod(
       payload,
       method,
-      buildTranslitRegistrationPayload(payload, handlerUrl, code, ruName),
+      registrationPayload,
     );
 
     return {
@@ -319,16 +325,37 @@ async function registerBizprocItem(payload, method, itemType, event, query) {
     };
   } catch (error) {
     if (String(error.bitrixBody?.error || '') === 'ERROR_ACTIVITY_ALREADY_INSTALLED') {
+      const updateMethod = itemType === 'robot' ? 'bizproc.robot.update' : 'bizproc.activity.update';
+      const { CODE: _code, ...fields } = registrationPayload;
+      const updateResult = await callBitrixMethod(payload, updateMethod, {
+        CODE: code,
+        FIELDS: fields,
+      });
+
       return {
         installed: true,
         type: itemType,
         alreadyInstalled: true,
         handlerUrl,
+        updated: true,
+        updateResult,
       };
     }
 
     throw error;
   }
+}
+
+async function listBitrix24Extensions(payload) {
+  const [activities, robots] = await Promise.all([
+    callBitrixMethod(payload, 'bizproc.activity.list', {}),
+    callBitrixMethod(payload, 'bizproc.robot.list', {}),
+  ]);
+
+  return {
+    activities,
+    robots,
+  };
 }
 
 async function registerBitrix24Extensions(payload, event, query) {
@@ -421,6 +448,16 @@ exports.handler = async function handler(event) {
         ok: true,
         mode: 'install',
         ...installResult,
+      });
+    }
+
+    if (action === 'list') {
+      const listResult = await listBitrix24Extensions(payload);
+
+      return response(200, {
+        ok: true,
+        mode: 'list',
+        ...listResult,
       });
     }
 
